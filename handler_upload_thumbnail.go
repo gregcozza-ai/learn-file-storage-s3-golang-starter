@@ -1,12 +1,14 @@
 package main
 
 import (
+	"crypto/rand"
+	"encoding/base64"
 	"fmt"
 	"io"
-	"path/filepath"
 	"net/http"
 	"os"
-	
+	"path/filepath"
+
 	"mime"
 
 	"github.com/bootdotdev/learn-file-storage-s3-golang-starter/internal/auth"
@@ -53,7 +55,7 @@ func (cfg *apiConfig) handlerUploadThumbnail(w http.ResponseWriter, r *http.Requ
 		respondWithError(w, http.StatusBadRequest, "Invalid Content-Type", err)
 		return 
 	}
-	if mediaType != "image/png" && mediaType != "image/jpeg" {
+	if mediatype != "image/png" && mediatype != "image/jpeg" {
 		respondWithError(w, http.StatusUnsupportedMediaType, "Only PNG and JPEG images are supported", nil)
 		return 
 	}
@@ -64,7 +66,18 @@ func (cfg *apiConfig) handlerUploadThumbnail(w http.ResponseWriter, r *http.Requ
 		extension = "png"
 	}
 	
-	filePath := filepath.Join(cfg.assetsRoot, videoID.String()+"."+extension)
+	// Generate random filename
+	randBytes := make([]byte, 32)
+	if _, err := rand.Read(randBytes); err != nil{
+		respondWithError(w, http.StatusInternalServerError, "Error generating random filename", err)
+		return 
+	}
+	randomName := base64.RawURLEncoding.EncodeToString(randBytes)
+	filename := randomName + "." + extension
+	filePath := filepath.Join(cfg.assetsRoot, filename)
+	thumbnailURL := "/assets/" + filename
+
+
 	outFile, err := os.Create(filePath)
 	if err != nil {
 		respondWithError(w, http.StatusInternalServerError, "Error creating file", err)
@@ -88,7 +101,6 @@ func (cfg *apiConfig) handlerUploadThumbnail(w http.ResponseWriter, r *http.Requ
 		return 
 	}
 
-	thumbnailURL := "/assets/" + videoID.String() + "." + extension
 	video.ThumbnailURL = &thumbnailURL
 
 	if err := cfg.db.UpdateVideo(video); err != nil {
