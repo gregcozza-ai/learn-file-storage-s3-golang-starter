@@ -3,8 +3,11 @@ package main
 import (
 	"fmt"
 	"io"
-	"encoding/base64"
+	"path/filepath"
 	"net/http"
+	"os"
+	
+	"mime"
 
 	"github.com/bootdotdev/learn-file-storage-s3-golang-starter/internal/auth"
 	"github.com/google/uuid"
@@ -44,13 +47,35 @@ func (cfg *apiConfig) handlerUploadThumbnail(w http.ResponseWriter, r *http.Requ
 	}
 	defer file.Close()
 
-	fileData, err := io.ReadAll(file)
+	mediaType := header.Header.Get("Content-Type")
+	mediatype, _, err := mime.ParseMediaType(mediaType)
 	if err != nil {
-		respondWithError(w, http.StatusInternalServerError, "Error reading file", err)
+		respondWithError(w, http.StatusBadRequest, "Invalid Content-Type", err)
 		return 
 	}
+	if mediaType != "image/png" && mediaType != "image/jpeg" {
+		respondWithError(w, http.StatusUnsupportedMediaType, "Only PNG and JPEG images are supported", nil)
+		return 
+	}
+
+	// Determine extension based on validated media type
+	extension := "jpg"
+	if mediatype == "image/png" {
+		extension = "png"
+	}
 	
-	mediaType := header.Header.Get("Content-Type")
+	filePath := filepath.Join(cfg.assetsRoot, videoID.String()+"."+extension)
+	outFile, err := os.Create(filePath)
+	if err != nil {
+		respondWithError(w, http.StatusInternalServerError, "Error creating file", err)
+		return 
+	}
+	defer outFile.Close()
+
+	if _, err := io.Copy(outFile, file); err != nil {
+		respondWithError(w, http.StatusInternalServerError, "Error saving file", err)
+		return 
+	}
 
 	video, err := cfg.db.GetVideo(videoID)
 	if err != nil {
@@ -63,18 +88,13 @@ func (cfg *apiConfig) handlerUploadThumbnail(w http.ResponseWriter, r *http.Requ
 		return 
 	}
 
-	videoThumbnails[videoID] = thumbnail{
-		data:      fileData,
-		mediaType: mediaType,		
-	}
-
-	thumbnailURL := fmt.Sprintf("http://localhost:%s/api/thumbnails/%s", cfg.port, videoID.String())
-	video.ThumbnailURL = &thumbnailURL 
+	thumbnailURL := "/assets/" + videoID.String() + "." + extension
+	video.ThumbnailURL = &thumbnailURL
 
 	if err := cfg.db.UpdateVideo(video); err != nil {
-		respondWithError(w, http.StatusInternalServerError, "Error updating video with thumbnail URL", err)
+		respondWithError(w, http.StatusInternalServerError, "Error updating video", err)
 		return 
 	}
 
-	respondWithJSON(w, http.StatusOK, struct{}{})
+	respondWithJSON(w, http.StatusOK, video)
 }
